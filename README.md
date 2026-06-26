@@ -1,15 +1,16 @@
-# Jarvis — Voice Assistant (Phase 4)
+# Jarvis — Voice Assistant (Phase 5)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
 witty, concise personality powered by Claude.
 
-An intent-routing step classifies every request into one of four categories
+An intent-routing step classifies every request into one of five categories
 and dispatches it to the right skill:
 
 - **`music_control`** → Spotify (Phase 2)
 - **`system_control`** → open apps, open websites/search, basic file ops (Phase 3)
 - **`web_lookup`** → live internet search via Claude's built-in web search (Phase 4)
+- **`code_generation`** → generate code to a file and open it in an editor (Phase 5)
 - **`general_chat`** → a normal spoken Claude reply
 
 Intent classification and parameter extraction both happen in a single Claude
@@ -21,10 +22,10 @@ searches the web rather than risk answering with stale info.
 wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
         ↑                                                          ↓
         |                                              intent router (Claude)
-        |                ┌───────────────────┬───────────────────┬───────────────────┐
-        |          music_control       system_control        web_lookup         general_chat
-        |                ↓                   ↓                    ↓                   ↓
-      speak ← TTS ← Spotify skill  /   System skill   /   Web search (Claude)  /  Claude reply
+        |        ┌──────────────┬──────────────┬──────────────┬──────────────┐
+        |  music_control  system_control  web_lookup   code_generation  general_chat
+        |        ↓              ↓              ↓              ↓              ↓
+      speak ← TTS ← Spotify / System / Web search / Code→file→editor / Claude reply
 ```
 
 ## How it works
@@ -38,6 +39,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | Music control    | [Spotipy](https://spotipy.readthedocs.io/) (Spotify Web API) |
 | System control   | Python stdlib (`os`, `subprocess`, `webbrowser`) |
 | Web lookup       | Claude built-in **web search** tool (`web_search_20250305`) |
+| Code generation  | Claude + local file write + VS Code `code` CLI / OS editor |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -78,6 +80,29 @@ Timeless stuff (math, definitions, coding help, jokes, casual chat, concept
 explanations) is answered directly without a search. If a search turns up
 nothing useful, Jarvis just says it couldn't find anything solid rather than
 guessing.
+
+### Code generation commands (Phase 5)
+
+Ask Jarvis to write code and it generates a file, saves it to
+`./jarvis_generated_code/`, and opens it in your editor — then gives a short
+spoken confirmation instead of reading the code aloud.
+
+- "write me a Python script that renames all files in a folder"
+- "create a Java function for bubble sort"
+- "write a webpage in HTML with a contact form"
+- "make a script that scrapes headlines from a website"
+
+The language sets the extension (`.py`, `.js`, `.html`, `.java`, …). If you name
+the file ("call it scraper") that's used; otherwise Jarvis picks a sensible name
+from your request. Existing files are **never overwritten** — it appends a
+number (`scraper.py`, `scraper_1.py`, …).
+
+> **Not** code generation: "what does this Python error mean", "explain this
+> function", "how do I use a dictionary" — those stay general chat. Code
+> generation triggers only when you want a **new file** written.
+
+> ⚠️ **Safety:** generated code is **never executed automatically** — Jarvis
+> only writes the file and opens it. You review and run it yourself.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -209,6 +234,23 @@ changes needed. The defaults assume **Windows**.
 > your yes/no answer immediately (no wake word needed) and does **nothing**
 > unless you clearly confirm. Anything else cancels.
 
+### 6. Code generation setup (Phase 5 — VS Code CLI, optional)
+
+Generated code is saved to a **`jarvis_generated_code/`** folder in the project
+directory (created automatically) and opened in an editor.
+
+For the **VS Code integration**, the `code` command must be available on your
+`PATH`. To enable it: open VS Code → **Command Palette** (`Ctrl/Cmd+Shift+P`) →
+run **"Shell Command: Install 'code' command in PATH"**
+([docs](https://code.visualstudio.com/docs/configure/command-line#_launching-from-command-line)).
+
+If the `code` command isn't found, Jarvis falls back to opening the file with
+your **OS default editor** for that file type, so this step is optional.
+
+> ⚠️ **Safety:** Jarvis **never executes** generated code. It only writes the
+> file and opens it for you to review and run yourself. Existing files are never
+> overwritten — a numeric suffix is added instead.
+
 ## Run
 
 ```bash
@@ -254,6 +296,18 @@ A web-lookup turn looks like:
 🔊 Speaking...
 ```
 
+A code-generation turn looks like:
+
+```
+🗣️  Heard: write me a python script that renames files
+🧭 Routing intent...
+⌨️  code_generation {'request': 'a script that renames files', 'language': 'python'}
+⌨️  Generating code: a script that renames files
+💾 Saved /path/to/jarvis_generated_code/renames_files.py
+💬 Jarvis: Done, I've opened renames_files.py in VS Code.
+🔊 Speaking...
+```
+
 A general-chat turn (no search) looks like:
 
 ```
@@ -288,13 +342,15 @@ config.py               # settings + logging + system_config.json loader
 wake_word.py            # openWakeWord detection
 recorder.py             # VAD-based recording until silence
 stt.py                  # faster-whisper transcription
-intent_router.py        # Claude tool-use: music / system / web_lookup / general_chat
+intent_router.py        # Claude tool-use: music / system / web / code / general_chat
 skills/
   base.py               # SkillResult (incl. pending/confirmation contract)
   spotify_skill.py      # Spotipy playback control + music_control tool schema
   system_skill.py       # apps / websites / file ops + system_control tool schema
   web_skill.py          # live web search via Claude web_search + web_lookup tool schema
+  code_skill.py         # code generation -> file -> editor + code_generation tool schema
 system_config.json      # editable app nickname -> path + folder shortcuts
+jarvis_generated_code/  # (auto-created) generated code files land here
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
 tts.py                  # pyttsx3 / ElevenLabs speech output
 main.py                 # the loop that ties it all together (incl. confirmation step)
@@ -303,13 +359,13 @@ main.py                 # the loop that ties it all together (incl. confirmation
 ### Intent routing
 
 `intent_router.py` makes a single Claude call per utterance, passing the
-`music_control`, `system_control`, and `web_lookup` tool definitions. Claude
-either **calls a tool** (returning a structured payload we dispatch to
-`SpotifySkill`, `SystemSkill`, or `WebSkill`) or **replies in plain text**
-(general chat). This uses Claude's native tool use / function calling for intent
-classification *and* parameter extraction — no manual keyword parsing. Short
-conversation history is retained so follow-ups ("play it again", "now what's
-playing?") keep context.
+`music_control`, `system_control`, `web_lookup`, and `code_generation` tool
+definitions. Claude either **calls a tool** (returning a structured payload we
+dispatch to `SpotifySkill`, `SystemSkill`, `WebSkill`, or `CodeSkill`) or
+**replies in plain text** (general chat). This uses Claude's native tool use /
+function calling for intent classification *and* parameter extraction — no
+manual keyword parsing. Short conversation history is retained so follow-ups
+("play it again", "now what's playing?") keep context.
 
 **Web-search bias:** the routing call appends `config.ROUTING_GUIDANCE`, which
 instructs Claude to default to `web_lookup` whenever it isn't highly confident
@@ -365,6 +421,9 @@ omniscient**, and it can still get things wrong:
 
 Treat Jarvis like a very well-informed assistant, not an oracle — for anything
 high-stakes, verify independently.
+
+**Generated code** is written and opened, never run. Like any AI-generated
+code it can contain bugs or insecure patterns — review it before executing.
 
 ## Roadmap (next phases)
 

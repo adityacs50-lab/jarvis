@@ -1,5 +1,6 @@
 .env
 .spotify_cache
+jarvis_generated_code/
 __pycache__/
 *.pyc
 .venv/
