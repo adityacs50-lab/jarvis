@@ -1,9 +1,14 @@
 """Intent router: classify each utterance and dispatch to the right skill.
 
-A single Claude call with tool use decides between three intents:
+A single Claude call with tool use decides between four intents:
   - music_control   -> Spotify skill
   - system_control  -> System skill (apps, websites, files)
+  - web_lookup      -> Web skill (live internet search via Claude web_search)
   - general_chat    -> plain text reply
+
+The router is deliberately biased toward web_lookup: unless Claude is highly
+confident the answer is timeless/static, it should search rather than answer
+from memory (see config.ROUTING_GUIDANCE).
 
 Claude's native tool use does both intent classification and structured
 parameter extraction in one step (no hand-rolled string parsing).
@@ -18,6 +23,7 @@ import config
 from skills.base import SkillResult, as_result
 from skills.spotify_skill import MUSIC_CONTROL_TOOL
 from skills.system_skill import SYSTEM_CONTROL_TOOL
+from skills.web_skill import WEB_LOOKUP_TOOL
 
 log = logging.getLogger("jarvis.router")
 
@@ -28,7 +34,7 @@ _AFFIRMATIVE = {
 
 
 class IntentRouter:
-    def __init__(self, spotify_skill=None, system_skill=None):
+    def __init__(self, spotify_skill=None, system_skill=None, web_skill=None):
         from anthropic import Anthropic
 
         if not config.ANTHROPIC_API_KEY:
@@ -38,8 +44,12 @@ class IntentRouter:
         self.client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
         self.spotify = spotify_skill
         self.system = system_skill
+        self.web = web_skill
         self.history = []
         self._pending = None  # callable awaiting spoken confirmation
+
+        # Routing call gets extra guidance biasing toward live web lookup.
+        self.system_prompt = config.SYSTEM_PROMPT + "\n\n" + config.ROUTING_GUIDANCE
 
         # Only advertise tools whose skills are actually available.
         self.tools = []
@@ -47,6 +57,8 @@ class IntentRouter:
             self.tools.append(MUSIC_CONTROL_TOOL)
         if system_skill:
             self.tools.append(SYSTEM_CONTROL_TOOL)
+        if web_skill:
+            self.tools.append(WEB_LOOKUP_TOOL)
 
     # -- public API --------------------------------------------------------
     def handle(self, user_text) -> SkillResult:
@@ -65,7 +77,7 @@ class IntentRouter:
         message = self.client.messages.create(
             model=config.CLAUDE_MODEL,
             max_tokens=config.CLAUDE_MAX_TOKENS,
-            system=config.SYSTEM_PROMPT,
+            system=self.system_prompt,
             tools=self.tools,
             messages=self.history,
         )
@@ -81,6 +93,10 @@ class IntentRouter:
         if tool_use and tool_use.name == "system_control" and self.system:
             return self._dispatch("🖥️  system_control", message, tool_use,
                                    self.system.handle(tool_use.input))
+
+        if tool_use and tool_use.name == "web_lookup" and self.web:
+            return self._dispatch("🌐 web_lookup", message, tool_use,
+                                   self.web.handle(tool_use.input))
 
         # General chat: speak Claude's text reply.
         reply = "".join(

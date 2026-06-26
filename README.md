@@ -1,27 +1,30 @@
-# Jarvis — Voice Assistant (Phase 3)
+# Jarvis — Voice Assistant (Phase 4)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
 witty, concise personality powered by Claude.
 
-An intent-routing step classifies every request into one of three categories
+An intent-routing step classifies every request into one of four categories
 and dispatches it to the right skill:
 
 - **`music_control`** → Spotify (Phase 2)
 - **`system_control`** → open apps, open websites/search, basic file ops (Phase 3)
+- **`web_lookup`** → live internet search via Claude's built-in web search (Phase 4)
 - **`general_chat`** → a normal spoken Claude reply
 
 Intent classification and parameter extraction both happen in a single Claude
-call using native tool use — no keyword matching.
+call using native tool use — no keyword matching. The router is deliberately
+biased toward `web_lookup`: unless it's confident the answer is timeless, it
+searches the web rather than risk answering with stale info.
 
 ```
 wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
         ↑                                                          ↓
         |                                              intent router (Claude)
-        |                            ┌──────────────────────┼──────────────────────┐
-        |                      music_control          system_control          general_chat
-        |                            ↓                      ↓                       ↓
-      speak  ←  text-to-speech  ←  Spotify skill   /   System skill    /     Claude reply
+        |                ┌───────────────────┬───────────────────┬───────────────────┐
+        |          music_control       system_control        web_lookup         general_chat
+        |                ↓                   ↓                    ↓                   ↓
+      speak ← TTS ← Spotify skill  /   System skill   /   Web search (Claude)  /  Claude reply
 ```
 
 ## How it works
@@ -34,6 +37,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | Intent + reasoning | Anthropic Claude (`claude-sonnet-4-6`) with **tool use** |
 | Music control    | [Spotipy](https://spotipy.readthedocs.io/) (Spotify Web API) |
 | System control   | Python stdlib (`os`, `subprocess`, `webbrowser`) |
+| Web lookup       | Claude built-in **web search** tool (`web_search_20250305`) |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -56,7 +60,24 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 - **Delete a file/folder** — "delete old.txt" → **requires spoken confirmation**
   (Jarvis asks "Are you sure…? Say yes to confirm" and does nothing unless you say yes)
 
-Anything that isn't music or system control is answered conversationally.
+### Web lookup commands (Phase 4)
+
+Jarvis searches the live web (via Claude's built-in web search) for anything
+current or factual, and speaks a short 1-3 sentence answer — no citations read
+aloud. It leans toward searching whenever an answer might depend on current info:
+
+- **Weather** — "what's the weather in Tokyo right now?"
+- **News** — "what's the latest on the election?"
+- **Scores / results** — "did the Lakers win last night?"
+- **Prices** — "how much is the new iPhone?", "what's Bitcoin at?"
+- **Current X** — "who's the current CEO of OpenAI?", "what's the newest Pixel?"
+- **Anything 'now/today/latest'** — and any named person, product, or event it
+  isn't sure is static.
+
+Timeless stuff (math, definitions, coding help, jokes, casual chat, concept
+explanations) is answered directly without a search. If a search turns up
+nothing useful, Jarvis just says it couldn't find anything solid rather than
+guessing.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -222,7 +243,18 @@ A system-control turn with a destructive action looks like:
 🔊 Speaking...   # "Deleted the folder old reports."
 ```
 
-A general-chat turn looks like:
+A web-lookup turn looks like:
+
+```
+🗣️  Heard: what's the weather in London right now
+🧭 Routing intent...
+🌐 web_lookup {'query': 'current weather in London'}
+🌐 Searching the web for: current weather in London
+💬 Jarvis: It's about 14 degrees and overcast in London right now, with light rain expected later.
+🔊 Speaking...
+```
+
+A general-chat turn (no search) looks like:
 
 ```
 🗣️  Heard: what's the capital of France
@@ -256,11 +288,12 @@ config.py               # settings + logging + system_config.json loader
 wake_word.py            # openWakeWord detection
 recorder.py             # VAD-based recording until silence
 stt.py                  # faster-whisper transcription
-intent_router.py        # Claude tool-use: music_control / system_control / general_chat
+intent_router.py        # Claude tool-use: music / system / web_lookup / general_chat
 skills/
   base.py               # SkillResult (incl. pending/confirmation contract)
   spotify_skill.py      # Spotipy playback control + music_control tool schema
   system_skill.py       # apps / websites / file ops + system_control tool schema
+  web_skill.py          # live web search via Claude web_search + web_lookup tool schema
 system_config.json      # editable app nickname -> path + folder shortcuts
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
 tts.py                  # pyttsx3 / ElevenLabs speech output
@@ -270,12 +303,21 @@ main.py                 # the loop that ties it all together (incl. confirmation
 ### Intent routing
 
 `intent_router.py` makes a single Claude call per utterance, passing the
-`music_control` and `system_control` tool definitions. Claude either **calls a
-tool** (returning a structured payload we dispatch to `SpotifySkill` or
-`SystemSkill`) or **replies in plain text** (general chat). This uses Claude's
-native tool use / function calling for intent classification *and* parameter
-extraction — no manual keyword parsing. Short conversation history is retained
-so follow-ups ("play it again", "now what's playing?") keep context.
+`music_control`, `system_control`, and `web_lookup` tool definitions. Claude
+either **calls a tool** (returning a structured payload we dispatch to
+`SpotifySkill`, `SystemSkill`, or `WebSkill`) or **replies in plain text**
+(general chat). This uses Claude's native tool use / function calling for intent
+classification *and* parameter extraction — no manual keyword parsing. Short
+conversation history is retained so follow-ups ("play it again", "now what's
+playing?") keep context.
+
+**Web-search bias:** the routing call appends `config.ROUTING_GUIDANCE`, which
+instructs Claude to default to `web_lookup` whenever it isn't highly confident
+the answer is timeless. False positives (searching unnecessarily) are cheap;
+false negatives (answering stale info) are not. `web_lookup` dispatches to
+`WebSkill`, which makes a second Claude call with the hosted
+`web_search_20250305` tool enabled so Claude searches and synthesizes a short
+spoken answer. Clear music/system requests still route to their own skills.
 
 **Confirmation contract:** skills return a `SkillResult`. For destructive
 operations the result carries a `pending` callable instead of executing
@@ -305,6 +347,24 @@ makes it reusable by future skills.
   `PATH` or a valid full path. Test it in a terminal first (e.g. `where chrome`).
 - **File command can't find a folder:** use a `folders` shortcut, a full path,
   or `~`/env vars — relative names only work if they're configured.
+
+## Limitations
+
+Jarvis uses **live web search**, so it's far more current than a normal chatbot
+— it can pull today's weather, prices, scores, and news. But it is **not
+omniscient**, and it can still get things wrong:
+
+- **Breaking news may lag.** Minutes-old developments might not be indexed yet,
+  so very fresh stories can be incomplete or slightly behind.
+- **No access to private/personal data.** It can't see your accounts, files it
+  wasn't asked to open, messages, or anything behind a login.
+- **Obscure topics with thin web coverage** may yield little, and for those
+  Jarvis will usually say it couldn't find anything solid rather than guess.
+- **It can occasionally be wrong or misread a source.** Synthesizing a 1-3
+  sentence spoken answer means nuance gets compressed.
+
+Treat Jarvis like a very well-informed assistant, not an oracle — for anything
+high-stakes, verify independently.
 
 ## Roadmap (next phases)
 

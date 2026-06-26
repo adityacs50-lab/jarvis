@@ -10,6 +10,7 @@ from intent_router import IntentRouter
 from recorder import Recorder
 from skills.spotify_skill import SpotifySkill
 from skills.system_skill import SystemSkill
+from skills.web_skill import WebSkill
 from stt import Transcriber
 from tts import create_tts
 from wake_word import WakeWordDetector
@@ -20,7 +21,7 @@ log = logging.getLogger("jarvis")
 def main():
     config.setup_logging()
     log.info("=" * 50)
-    log.info(" JARVIS voice assistant — Phase 3 (Spotify + system control)")
+    log.info(" JARVIS voice assistant — Phase 4 (music + system + web)")
     log.info("=" * 50)
 
     # Initialize components (loads models, validates API key).
@@ -44,7 +45,16 @@ def main():
             log.warning("System control disabled: %s", e)
             system = None
 
-        router = IntentRouter(spotify_skill=spotify, system_skill=system)
+        # Web lookup uses Claude's built-in web search (needs the API key).
+        try:
+            web = WebSkill()
+        except Exception as e:
+            log.warning("Web lookup disabled: %s", e)
+            web = None
+
+        router = IntentRouter(
+            spotify_skill=spotify, system_skill=system, web_skill=web
+        )
     except Exception as e:
         log.error("Startup failed: %s", e)
         sys.exit(1)

@@ -41,6 +41,21 @@ SYSTEM_PROMPT = (
     "ramble. Skip markdown, bullet points, and emoji since they can't be spoken."
 )
 
+# Extra guidance injected only for the intent-routing call. Strongly biases
+# toward live web lookup when there's any doubt the answer is static.
+ROUTING_GUIDANCE = (
+    "When deciding how to handle a request, follow this rule: if you are NOT "
+    "highly confident the answer is timeless, static knowledge (math, "
+    "definitions, coding help, casual chat, explaining a concept, a joke), "
+    "prefer the web_lookup tool over answering from memory. Searching when you "
+    "didn't strictly need to is cheap and harmless; answering with stale or "
+    "uncertain info is worse. Anything involving current events, weather, news, "
+    "prices, scores, 'who is the current/latest X', or any named person, "
+    "company, product, place, or event you aren't sure is unchanging should use "
+    "web_lookup. Still route clear music requests to music_control and clear "
+    "computer/app/file requests to system_control."
+)
+
 # --- Spotify --------------------------------------------------------------
 SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID", "")
 SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET", "")
