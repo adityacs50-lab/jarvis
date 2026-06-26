@@ -7,6 +7,7 @@ import sys
 
 import config
 from intent_router import IntentRouter
+from memory import Memory
 from recorder import Recorder
 from skills.code_skill import CodeSkill
 from skills.spotify_skill import SpotifySkill
@@ -23,7 +24,7 @@ log = logging.getLogger("jarvis")
 def main():
     config.setup_logging()
     log.info("=" * 50)
-    log.info(" JARVIS voice assistant — Phase 6 (+ study mode)")
+    log.info(" JARVIS voice assistant — Phase 7 (+ persistent memory)")
     log.info("=" * 50)
 
     # Initialize components (loads models, validates API key).
@@ -64,9 +65,16 @@ def main():
         # Study mode (no external deps; pure prompt/session state).
         study = StudySkill()
 
+        # Persistent memory (local SQLite). Never block startup on it.
+        try:
+            memory = Memory()
+        except Exception as e:
+            log.warning("Memory disabled: %s", e)
+            memory = None
+
         router = IntentRouter(
             spotify_skill=spotify, system_skill=system, web_skill=web,
-            code_skill=code, study_skill=study,
+            code_skill=code, study_skill=study, memory=memory,
         )
     except Exception as e:
         log.error("Startup failed: %s", e)
@@ -113,6 +121,13 @@ def main():
             log.error("Error in loop: %s", e, exc_info=True)
             # Keep the assistant alive on transient errors.
             continue
+
+    # Flush any remaining exchanges into a memory note before exiting.
+    if memory:
+        try:
+            memory.summarize_session()
+        except Exception as e:
+            log.warning("Could not summarize session on exit: %s", e)
 
 
 if __name__ == "__main__":

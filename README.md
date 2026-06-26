@@ -1,4 +1,4 @@
-# Jarvis — Voice Assistant (Phase 6)
+# Jarvis — Voice Assistant (Phase 7)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
@@ -12,11 +12,13 @@ skill:
 - **`web_lookup`** → live internet search via Claude's built-in web search (Phase 4)
 - **`code_generation`** → generate code to a file and open it in an editor (Phase 5)
 - **`study_mode`** → toggle an adaptive Socratic **Study Mode** tutor (Phase 6)
+- **`memory_recall`** / **`memory_clear`** → recall or wipe long-term memory (Phase 7)
 - **`general_chat`** → a normal spoken Claude reply
 
 **Study Mode** is a session toggle: while on, concept/coursework questions are
 answered by a Socratic tutor instead of the normal assistant (see
-[Study Mode](#study-mode) below).
+[Study Mode](#study-mode) below). **Memory** gives Jarvis continuity across
+sessions via a local database (see [Memory](#memory) below).
 
 Intent classification and parameter extraction both happen in a single Claude
 call using native tool use — no keyword matching. The router is deliberately
@@ -46,6 +48,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | Web lookup       | Claude built-in **web search** tool (`web_search_20250305`) |
 | Code generation  | Claude + local file write + VS Code `code` CLI / OS editor |
 | Study Mode       | Claude with a dedicated Socratic tutoring prompt + session state |
+| Memory           | local **SQLite** (`jarvis_memory.db`) + Claude session summaries |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -148,6 +151,56 @@ get routed to the tutor.
 > not to do the work for you.* It will deliberately resist just handing over
 > full answers unless you explicitly ask it to. That's the point — it's a tutor,
 > not an answer key.
+
+## Memory
+
+Jarvis remembers across sessions. Everything is stored **locally** in an SQLite
+file, **`jarvis_memory.db`**, created automatically on first run. Two tables:
+
+- **`session_log`** — the raw log of each exchange (`timestamp`, `user_text`,
+  `jarvis_response`, `intent_type`).
+- **`memory_notes`** — compact, Claude-written summaries of past sessions
+  (`date`, `summary_text`). These keep long-term memory small instead of
+  bloating every future prompt with full transcripts.
+
+**How it works:**
+
+- **During a session**, every ~6 exchanges (and once more on exit) Jarvis makes
+  a *separate, lightweight* Claude call to summarize the recent exchanges into a
+  short memory note. Study sessions capture the subjects/topics covered, for
+  tutoring continuity.
+- **At the start of each session**, the most recent notes (default 10,
+  configurable via `MEMORY_NOTES_TO_LOAD`) are loaded and injected into the
+  system prompt as quiet background context — so Jarvis has continuity without
+  re-reading full transcripts.
+- **It won't bring up old conversations unprompted.** Memory is used quietly to
+  inform tone/context; Jarvis only surfaces a specific past detail when it's
+  directly relevant or when you explicitly ask.
+
+**Recall on demand** (queries the raw log by keyword/date):
+
+- "Jarvis, what did we talk about yesterday?"
+- "what did we cover last time?"
+- "remind me what we said about hash tables"
+
+**Clear memory** (wipes *both* tables, with a spoken confirmation first):
+
+- "Jarvis, forget everything" / "clear your memory" → Jarvis asks
+  "Are you sure…? Say yes to confirm" and only wipes if you confirm.
+
+**View it yourself** — it's a plain SQLite file:
+
+```bash
+sqlite3 jarvis_memory.db "SELECT timestamp, user_text, jarvis_response FROM session_log;"
+sqlite3 jarvis_memory.db "SELECT date, summary_text FROM memory_notes;"
+```
+
+> 🔒 **Privacy:** memory is **local to this machine** and is never sent anywhere
+> except to Claude's API as context/summarization input. But it is **not
+> encrypted** — anyone with access to `jarvis_memory.db` can read your
+> conversation history. Don't speak sensitive information (passwords, card
+> numbers, secrets) to Jarvis. Delete `jarvis_memory.db` or say "forget
+> everything" to wipe it.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -368,6 +421,16 @@ A study-mode session looks like:
 🔊 Speaking...
 ```
 
+A memory-recall turn looks like:
+
+```
+🗣️  Heard: what did we talk about yesterday
+🧭 Routing intent...
+🧠 memory_recall {'when': 'yesterday'}
+💬 Jarvis: Yesterday we went over graph algorithms — mostly Dijkstra and BFS — and you asked about the weather.
+🔊 Speaking...
+```
+
 A general-chat turn (no search) looks like:
 
 ```
@@ -402,7 +465,8 @@ config.py               # settings + logging + system_config.json loader
 wake_word.py            # openWakeWord detection
 recorder.py             # VAD-based recording until silence
 stt.py                  # faster-whisper transcription
-intent_router.py        # Claude tool-use router + study-mode state machine
+intent_router.py        # Claude tool-use router + study-mode state machine + memory logging
+memory.py               # SQLite persistent memory: session log, summaries, recall, clear
 skills/
   base.py               # SkillResult (incl. pending/confirmation contract)
   spotify_skill.py      # Spotipy playback control + music_control tool schema
@@ -412,6 +476,7 @@ skills/
   study_skill.py        # Socratic tutor prompt + study_mode toggle + session topics
 system_config.json      # editable app nickname -> path + folder shortcuts
 jarvis_generated_code/  # (auto-created) generated code files land here
+jarvis_memory.db        # (auto-created) local SQLite conversation memory
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
 tts.py                  # pyttsx3 / ElevenLabs speech output
 main.py                 # the loop that ties it all together (incl. confirmation step)
@@ -427,6 +492,15 @@ dispatch to `SpotifySkill`, `SystemSkill`, `WebSkill`, or `CodeSkill`) or
 function calling for intent classification *and* parameter extraction — no
 manual keyword parsing. Short conversation history is retained so follow-ups
 ("play it again", "now what's playing?") keep context.
+
+**Memory:** `memory.py` logs every exchange to SQLite and periodically asks
+Claude (a separate summarization prompt) to compress recent exchanges into a
+compact note. At startup the router loads recent notes via `memory.context_block()`
+and injects them as quiet background context — with an explicit instruction *not*
+to bring up past conversations unprompted. The `memory_recall` and `memory_clear`
+tools (the latter gated by the same spoken-confirmation mechanism as deletes)
+handle on-demand recall and wiping. Memory works in study mode too; study
+summaries record the subjects covered for tutoring continuity.
 
 **Study Mode state machine:** the router holds a `study_mode` flag. The
 `study_mode` tool toggles it (and clears history for a clean session). While on,

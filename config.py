@@ -58,6 +58,13 @@ ROUTING_GUIDANCE = (
     "computer/app/file requests to system_control."
 )
 
+# --- Memory (Phase 7) -----------------------------------------------------
+MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "jarvis_memory.db")
+# How many recent memory notes to load into the system prompt at startup.
+MEMORY_NOTES_TO_LOAD = int(os.getenv("MEMORY_NOTES_TO_LOAD", "10"))
+# Summarize the session into a memory note every N logged exchanges.
+MEMORY_SUMMARIZE_EVERY = int(os.getenv("MEMORY_SUMMARIZE_EVERY", "6"))
+
 # --- Spotify --------------------------------------------------------------
 SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID", "")
 SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET", "")

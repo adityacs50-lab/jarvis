@@ -28,6 +28,7 @@ is interpreted as yes/no via `confirm()` before anything is executed.
 import logging
 
 import config
+from memory import MEMORY_CLEAR_TOOL, MEMORY_RECALL_TOOL
 from skills.base import SkillResult, as_result
 from skills.code_skill import CODE_GENERATION_TOOL
 from skills.spotify_skill import MUSIC_CONTROL_TOOL
@@ -55,7 +56,7 @@ _AFFIRMATIVE = {
 
 class IntentRouter:
     def __init__(self, spotify_skill=None, system_skill=None, web_skill=None,
-                 code_skill=None, study_skill=None):
+                 code_skill=None, study_skill=None, memory=None):
         from anthropic import Anthropic
 
         if not config.ANTHROPIC_API_KEY:
@@ -68,12 +69,17 @@ class IntentRouter:
         self.web = web_skill
         self.code = code_skill
         self.study = study_skill
+        self.memory = memory
         self.history = []
         self._pending = None  # callable awaiting spoken confirmation
+        self._current_user = None  # utterance being processed (for logging)
         self.study_mode = False  # session-state flag
 
         # Routing call gets extra guidance biasing toward live web lookup.
         self.system_prompt = config.SYSTEM_PROMPT + "\n\n" + config.ROUTING_GUIDANCE
+
+        # Load compact long-term memory once, injected as quiet background.
+        self.memory_context = memory.context_block() if memory else ""
 
     def _active_tools(self):
         """Tools advertised this turn (depends on study mode)."""
@@ -86,6 +92,9 @@ class IntentRouter:
             tools.append(WEB_LOOKUP_TOOL)
         if self.study:
             tools.append(STUDY_MODE_TOOL)
+        if self.memory:
+            tools.append(MEMORY_RECALL_TOOL)
+            tools.append(MEMORY_CLEAR_TOOL)
         # Code generation is hidden while studying so coursework is taught.
         if self.code and not self.study_mode:
             tools.append(CODE_GENERATION_TOOL)
@@ -103,6 +112,7 @@ class IntentRouter:
             return self.confirm(user_text)
 
         log.info("🧭 Routing intent...%s", " [study]" if self.study_mode else "")
+        self._current_user = user_text
         self.history.append({"role": "user", "content": user_text})
 
         if self.study_mode and self.study:
@@ -111,6 +121,10 @@ class IntentRouter:
         else:
             system = self.system_prompt
             max_tokens = config.CLAUDE_MAX_TOKENS
+
+        # Inject compact long-term memory as quiet background context.
+        if self.memory_context:
+            system = system + "\n\n" + self.memory_context
 
         message = self.client.messages.create(
             model=config.CLAUDE_MODEL,
@@ -127,21 +141,43 @@ class IntentRouter:
         if tool_use and tool_use.name == "study_mode" and self.study:
             return self._handle_study_toggle(tool_use)
 
+        if tool_use and tool_use.name == "memory_recall" and self.memory:
+            log.info("🧠 memory_recall %s", tool_use.input)
+            return self._dispatch("🧠 memory_recall", message, tool_use,
+                                   self.memory.recall(**_recall_args(tool_use.input)),
+                                   intent="memory_recall", log_memory=False)
+
+        if tool_use and tool_use.name == "memory_clear" and self.memory:
+            # Wipe requires spoken confirmation via the pending mechanism.
+            log.info("🧠 memory_clear requested")
+            return self._dispatch(
+                "🧠 memory_clear", message, tool_use,
+                SkillResult(
+                    "Are you sure you want me to erase everything I remember? "
+                    "Say yes to confirm.",
+                    pending=self._wipe_memory,
+                ),
+                intent="memory_clear", log_memory=False)
+
         if tool_use and tool_use.name == "music_control" and self.spotify:
             return self._dispatch("🎵 music_control", message, tool_use,
-                                   self.spotify.handle(tool_use.input))
+                                   self.spotify.handle(tool_use.input),
+                                   intent="music_control")
 
         if tool_use and tool_use.name == "system_control" and self.system:
             return self._dispatch("🖥️  system_control", message, tool_use,
-                                   self.system.handle(tool_use.input))
+                                   self.system.handle(tool_use.input),
+                                   intent="system_control")
 
         if tool_use and tool_use.name == "web_lookup" and self.web:
             return self._dispatch("🌐 web_lookup", message, tool_use,
-                                   self.web.handle(tool_use.input))
+                                   self.web.handle(tool_use.input),
+                                   intent="web_lookup")
 
         if tool_use and tool_use.name == "code_generation" and self.code:
             return self._dispatch("⌨️  code_generation", message, tool_use,
-                                   self.code.handle(tool_use.input))
+                                   self.code.handle(tool_use.input),
+                                   intent="code_generation")
 
         # No tool: a plain text reply (general chat, or tutoring in study mode).
         reply = "".join(
@@ -152,9 +188,16 @@ class IntentRouter:
         if self.study_mode and self.study:
             self.study.note_topic(user_text)
             log.info("📚 [study] Jarvis: %s", reply)
+            self._log("study", reply)
         else:
             log.info("💬 [chat] Jarvis: %s", reply)
+            self._log("general_chat", reply)
         return SkillResult(reply)
+
+    def _wipe_memory(self) -> SkillResult:
+        result = self.memory.clear()
+        self.memory_context = ""  # stop injecting now-deleted notes this session
+        return result
 
     def _handle_study_toggle(self, tool_use) -> SkillResult:
         action = (tool_use.input or {}).get("action")
@@ -190,7 +233,14 @@ class IntentRouter:
         return self._pending is not None
 
     # -- internals ---------------------------------------------------------
-    def _dispatch(self, tag, message, tool_use, skill_value) -> SkillResult:
+    def _log(self, intent, response):
+        """Persist an exchange to long-term memory (if enabled)."""
+        if self.memory and self._current_user:
+            self.memory.log_exchange(self._current_user, response, intent)
+            self.memory.maybe_summarize()
+
+    def _dispatch(self, tag, message, tool_use, skill_value, intent=None,
+                  log_memory=True) -> SkillResult:
         log.info("%s %s", tag, tool_use.input)
         result = as_result(skill_value)
 
@@ -216,6 +266,8 @@ class IntentRouter:
             log.info("⚠️  Awaiting confirmation: %s", result.speech)
         else:
             log.info("💬 Jarvis: %s", result.speech)
+            if log_memory:
+                self._log(intent, result.speech)
         return result
 
     def _trim_history(self):
@@ -227,6 +279,11 @@ class IntentRouter:
             self.history = self.history[-limit:]
             while self.history and _is_tool_result(self.history[0]):
                 self.history.pop(0)
+
+
+def _recall_args(tool_input):
+    ti = tool_input or {}
+    return {"query": ti.get("query"), "when": ti.get("when")}
 
 
 def _is_tool_result(msg):
