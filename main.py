@@ -6,8 +6,9 @@ import logging
 import sys
 
 import config
-from llm import Brain
+from intent_router import IntentRouter
 from recorder import Recorder
+from skills.spotify_skill import SpotifySkill
 from stt import Transcriber
 from tts import create_tts
 from wake_word import WakeWordDetector
@@ -18,7 +19,7 @@ log = logging.getLogger("jarvis")
 def main():
     config.setup_logging()
     log.info("=" * 50)
-    log.info(" JARVIS voice assistant — Phase 1")
+    log.info(" JARVIS voice assistant — Phase 2 (Spotify)")
     log.info("=" * 50)
 
     # Initialize components (loads models, validates API key).
@@ -26,8 +27,16 @@ def main():
         detector = WakeWordDetector()
         recorder = Recorder()
         transcriber = Transcriber()
-        brain = Brain()
         tts = create_tts()
+
+        # Spotify is optional — if it isn't configured, run chat-only.
+        try:
+            spotify = SpotifySkill()
+        except Exception as e:
+            log.warning("Spotify disabled: %s", e)
+            spotify = None
+
+        router = IntentRouter(spotify_skill=spotify)
     except Exception as e:
         log.error("Startup failed: %s", e)
         sys.exit(1)
@@ -49,8 +58,8 @@ def main():
             if not text:
                 continue
 
-            # 4. Ask Claude
-            reply = brain.ask(text)
+            # 4. Route intent (music control vs. general chat) and act
+            reply = router.handle(text)
             if not reply:
                 continue
 

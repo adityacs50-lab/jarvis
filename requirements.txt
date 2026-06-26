@@ -15,6 +15,9 @@ webrtcvad>=2.0.10
 # Speech-to-text (fast CPU transcription)
 faster-whisper>=1.0.0
 
+# Spotify control (Phase 2)
+spotipy>=2.23.0
+
 # Text-to-speech (offline default)
 pyttsx3>=2.90
 
