@@ -10,6 +10,7 @@ from intent_router import IntentRouter
 from recorder import Recorder
 from skills.code_skill import CodeSkill
 from skills.spotify_skill import SpotifySkill
+from skills.study_skill import StudySkill
 from skills.system_skill import SystemSkill
 from skills.web_skill import WebSkill
 from stt import Transcriber
@@ -22,7 +23,7 @@ log = logging.getLogger("jarvis")
 def main():
     config.setup_logging()
     log.info("=" * 50)
-    log.info(" JARVIS voice assistant — Phase 5 (music + system + web + code)")
+    log.info(" JARVIS voice assistant — Phase 6 (+ study mode)")
     log.info("=" * 50)
 
     # Initialize components (loads models, validates API key).
@@ -60,9 +61,12 @@ def main():
             log.warning("Code generation disabled: %s", e)
             code = None
 
+        # Study mode (no external deps; pure prompt/session state).
+        study = StudySkill()
+
         router = IntentRouter(
             spotify_skill=spotify, system_skill=system, web_skill=web,
-            code_skill=code,
+            code_skill=code, study_skill=study,
         )
     except Exception as e:
         log.error("Startup failed: %s", e)

@@ -1,17 +1,22 @@
-# Jarvis — Voice Assistant (Phase 5)
+# Jarvis — Voice Assistant (Phase 6)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
 witty, concise personality powered by Claude.
 
-An intent-routing step classifies every request into one of five categories
-and dispatches it to the right skill:
+An intent-routing step classifies every request and dispatches it to the right
+skill:
 
 - **`music_control`** → Spotify (Phase 2)
 - **`system_control`** → open apps, open websites/search, basic file ops (Phase 3)
 - **`web_lookup`** → live internet search via Claude's built-in web search (Phase 4)
 - **`code_generation`** → generate code to a file and open it in an editor (Phase 5)
+- **`study_mode`** → toggle an adaptive Socratic **Study Mode** tutor (Phase 6)
 - **`general_chat`** → a normal spoken Claude reply
+
+**Study Mode** is a session toggle: while on, concept/coursework questions are
+answered by a Socratic tutor instead of the normal assistant (see
+[Study Mode](#study-mode) below).
 
 Intent classification and parameter extraction both happen in a single Claude
 call using native tool use — no keyword matching. The router is deliberately
@@ -40,6 +45,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | System control   | Python stdlib (`os`, `subprocess`, `webbrowser`) |
 | Web lookup       | Claude built-in **web search** tool (`web_search_20250305`) |
 | Code generation  | Claude + local file write + VS Code `code` CLI / OS editor |
+| Study Mode       | Claude with a dedicated Socratic tutoring prompt + session state |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -103,6 +109,45 @@ number (`scraper.py`, `scraper_1.py`, …).
 
 > ⚠️ **Safety:** generated code is **never executed automatically** — Jarvis
 > only writes the file and opens it. You review and run it yourself.
+
+## Study Mode
+
+Study Mode turns Jarvis into an adaptive, Socratic tutor for engineering
+coursework (DSA, algorithms, OOP, math, systems). It's a **session toggle**,
+separate from the code-generation skill.
+
+**Toggle it by voice:**
+
+- "Jarvis, enter study mode" / "let's study" / "start studying" → Jarvis
+  announces the change and asks once: *"What are we working on today, and are we
+  doing a quick concept check or going deep?"* so it can calibrate pacing.
+- "Jarvis, exit study mode" / "I'm done studying" → returns to normal behavior.
+
+**While in study mode, the tutor:**
+
+- Is **Socratic** — when you're stuck it asks a leading question to find where
+  your understanding breaks down *before* handing over the full solution.
+- **Defaults to hints and partial explanations**, revealing more as needed —
+  *unless* you say "just give me the answer" or "I don't have time, explain it
+  directly," in which case it answers straight.
+- **Builds from first principles** — intuition and a simple example first, then
+  the formal definition.
+- For **coding coursework**, it encourages you to write the code yourself and
+  offers to review/debug it. It deliberately will **not** write the full
+  solution to a file (the `code_generation` skill is disabled while studying).
+- Keeps each spoken turn reasonably short, but goes longer for genuine
+  explanations.
+- **Remembers the session** — earlier topics stay in context, so it can say
+  things like "like we discussed with segment trees earlier."
+
+Music, system, and web commands still work in study mode for explicit requests
+("play some lo-fi", "what's the weather") — only general/coursework questions
+get routed to the tutor.
+
+> **Honest note:** Study Mode is designed to help you *understand the material,
+> not to do the work for you.* It will deliberately resist just handing over
+> full answers unless you explicitly ask it to. That's the point — it's a tutor,
+> not an answer key.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -308,6 +353,21 @@ A code-generation turn looks like:
 🔊 Speaking...
 ```
 
+A study-mode session looks like:
+
+```
+🗣️  Heard: jarvis enter study mode
+🧭 Routing intent...
+📚 Study mode ON — new session.
+💬 Jarvis: Study mode on. What are we working on today, and are we doing a quick concept check or going deep?
+🔊 Speaking...
+...
+🗣️  Heard: I'm stuck on reversing a linked list
+🧭 Routing intent... [study]
+📚 [study] Jarvis: Before I show you — what do you think you need to keep track of as you walk the list? What would you lose if you just moved forward?
+🔊 Speaking...
+```
+
 A general-chat turn (no search) looks like:
 
 ```
@@ -342,13 +402,14 @@ config.py               # settings + logging + system_config.json loader
 wake_word.py            # openWakeWord detection
 recorder.py             # VAD-based recording until silence
 stt.py                  # faster-whisper transcription
-intent_router.py        # Claude tool-use: music / system / web / code / general_chat
+intent_router.py        # Claude tool-use router + study-mode state machine
 skills/
   base.py               # SkillResult (incl. pending/confirmation contract)
   spotify_skill.py      # Spotipy playback control + music_control tool schema
   system_skill.py       # apps / websites / file ops + system_control tool schema
   web_skill.py          # live web search via Claude web_search + web_lookup tool schema
   code_skill.py         # code generation -> file -> editor + code_generation tool schema
+  study_skill.py        # Socratic tutor prompt + study_mode toggle + session topics
 system_config.json      # editable app nickname -> path + folder shortcuts
 jarvis_generated_code/  # (auto-created) generated code files land here
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
@@ -366,6 +427,12 @@ dispatch to `SpotifySkill`, `SystemSkill`, `WebSkill`, or `CodeSkill`) or
 function calling for intent classification *and* parameter extraction — no
 manual keyword parsing. Short conversation history is retained so follow-ups
 ("play it again", "now what's playing?") keep context.
+
+**Study Mode state machine:** the router holds a `study_mode` flag. The
+`study_mode` tool toggles it (and clears history for a clean session). While on,
+the router swaps in the tutoring system prompt, hides the `code_generation` tool,
+allows longer answers, and keeps a larger conversation window so the tutor can
+recall earlier topics — all without affecting the other skills.
 
 **Web-search bias:** the routing call appends `config.ROUTING_GUIDANCE`, which
 instructs Claude to default to `web_lookup` whenever it isn't highly confident

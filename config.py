@@ -34,6 +34,8 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 # --- LLM ------------------------------------------------------------------
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "200"))
+# Study Mode allows longer answers when the student wants a real explanation.
+STUDY_MAX_TOKENS = int(os.getenv("STUDY_MAX_TOKENS", "600"))
 SYSTEM_PROMPT = (
     "You are Jarvis, a helpful voice assistant with a witty, concise personality. "
     "Your responses are spoken aloud, so keep them SHORT — typically one or two "
