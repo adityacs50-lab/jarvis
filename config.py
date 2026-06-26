@@ -58,6 +58,15 @@ ROUTING_GUIDANCE = (
     "computer/app/file requests to system_control."
 )
 
+# --- Vision (Phase 8) -----------------------------------------------------
+WEBCAM_INDEX = int(os.getenv("WEBCAM_INDEX", "0"))
+# Seconds to wait after the heads-up before capturing, so the user can position.
+CAPTURE_DELAY_SECONDS = float(os.getenv("CAPTURE_DELAY_SECONDS", "2"))
+JARVIS_TEMP_DIR = os.getenv("JARVIS_TEMP_DIR", "jarvis_temp")
+CAPTURE_PATH = os.path.join(JARVIS_TEMP_DIR, "capture.jpg")
+# Keep captured webcam frames on disk instead of deleting after analysis.
+KEEP_CAPTURES = os.getenv("KEEP_CAPTURES", "false").lower() in ("1", "true", "yes")
+
 # --- Memory (Phase 7) -----------------------------------------------------
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "jarvis_memory.db")
 # How many recent memory notes to load into the system prompt at startup.

@@ -2,6 +2,7 @@
 .spotify_cache
 jarvis_generated_code/
 jarvis_memory.db
+jarvis_temp/
 __pycache__/
 *.pyc
 .venv/

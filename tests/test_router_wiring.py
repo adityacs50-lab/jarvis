@@ -86,6 +86,14 @@ class StudyStub:
     def note_topic(self, _): pass
 
 
+class VisionStub:
+    def __init__(self): self.last = None
+    def handle(self, tool_input, study_mode=False, tutor_system_prompt=None):
+        self.last = {"input": tool_input, "study_mode": study_mode,
+                     "tutor": tutor_system_prompt}
+        return SkillResult("<<vision>>")
+
+
 class MemStub:
     def __init__(self): self.logged = []; self.cleared = False
     def context_block(self): return ""
@@ -106,10 +114,12 @@ def check(label, cond):
 def make_router():
     spotify, system, web, code = (Stub("music"), DeleteStub("system"),
                                   Stub("web"), Stub("code"))
-    study, mem = StudyStub(), MemStub()
+    study, mem, vision = StudyStub(), MemStub(), VisionStub()
     r = IntentRouter(spotify_skill=spotify, system_skill=system, web_skill=web,
-                     code_skill=code, study_skill=study, memory=mem)
+                     code_skill=code, study_skill=study, vision_skill=vision,
+                     memory=mem)
     r.client = FakeClient()
+    r._vision = vision  # convenience handle for assertions
     return r, spotify, system, web, code, study, mem
 
 
@@ -179,6 +189,16 @@ def main():
     r.client.queue(tool_msg("memory_recall", {"when": "yesterday"}))
     out = r.handle("what did we talk about yesterday")
     check("memory_recall returns recall result", out.speech == "<<recall>>")
+
+    # 7b. vision_request routes and receives study context.
+    r, sp, sy, we, co, st, mem = make_router()
+    r.study_mode = True
+    r.client.queue(tool_msg("vision_request", {"request": "what does this say"}))
+    out = r.handle("look at this")
+    check("vision_request routes to vision", out.speech == "<<vision>>")
+    check("vision gets study_mode=True", r._vision.last["study_mode"] is True)
+    check("vision gets tutor prompt in study mode",
+          r._vision.last["tutor"] == "TUTOR")
 
     # 8. Plain text (no tool) -> general_chat reply + logged.
     r, sp, sy, we, co, st, mem = make_router()

@@ -18,6 +18,9 @@ faster-whisper>=1.0.0
 # Spotify control (Phase 2)
 spotipy>=2.23.0
 
+# Vision / webcam capture (Phase 8)
+opencv-python>=4.8.0
+
 # Text-to-speech (offline default)
 pyttsx3>=2.90
 

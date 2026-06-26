@@ -1,4 +1,4 @@
-# Jarvis — Voice Assistant (Phase 7)
+# Jarvis — Voice Assistant (Phase 8)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
@@ -13,6 +13,7 @@ skill:
 - **`code_generation`** → generate code to a file and open it in an editor (Phase 5)
 - **`study_mode`** → toggle an adaptive Socratic **Study Mode** tutor (Phase 6)
 - **`memory_recall`** / **`memory_clear`** → recall or wipe long-term memory (Phase 7)
+- **`vision_request`** → capture a webcam frame (or file) and analyze it (Phase 8)
 - **`general_chat`** → a normal spoken Claude reply
 
 **Study Mode** is a session toggle: while on, concept/coursework questions are
@@ -49,6 +50,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | Code generation  | Claude + local file write + VS Code `code` CLI / OS editor |
 | Study Mode       | Claude with a dedicated Socratic tutoring prompt + session state |
 | Memory           | local **SQLite** (`jarvis_memory.db`) + Claude session summaries |
+| Vision           | **OpenCV** webcam capture + Claude vision (`claude-sonnet-4-6`) |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -201,6 +203,44 @@ sqlite3 jarvis_memory.db "SELECT date, summary_text FROM memory_notes;"
 > conversation history. Don't speak sensitive information (passwords, card
 > numbers, secrets) to Jarvis. Delete `jarvis_memory.db` or say "forget
 > everything" to wipe it.
+
+## Vision
+
+Jarvis can look at something through your webcam (or an image file) and answer
+about it — read a page, describe an object, or help with a problem you hold up.
+
+**Trigger phrases** (Claude infers the intent):
+
+- "Jarvis, look at this" / "can you see this?"
+- "what does this say?" / "read this page"
+- "help me with this problem" (when you're clearly showing something)
+- File mode: "look at the image in `photo.jpg`" (skips the webcam, reads the file)
+
+**What happens:**
+
+1. Jarvis says **"Okay, hold it steady"** and waits ~2 seconds
+   (`CAPTURE_DELAY_SECONDS`) so you can position the page/object.
+2. It captures **one** frame, sends it to Claude's vision model with your spoken
+   request as context, and speaks a concise answer (you're probably holding a
+   book at an awkward angle — it keeps it short).
+3. The temp capture is **deleted** afterward by default.
+
+**Study Mode aware:** if you're in [Study Mode](#study-mode) and show it a
+homework problem, it stays Socratic — leaning toward a hint or leading question
+rather than just reading out the answer, unless you ask for the direct answer.
+
+> 🔒 **Privacy:** the camera is used **only on an explicit voice command** — it
+> is **never continuous or always-on**. Jarvis opens the webcam, grabs a single
+> frame, and releases it immediately. Captures are saved to `jarvis_temp/` and
+> **deleted after analysis** unless you set `KEEP_CAPTURES=true` in `.env`. The
+> frame is sent to Claude's API for analysis (and nowhere else).
+>
+> **Webcam permissions are OS-specific.** Your OS may need to grant camera
+> access to the terminal/Python process. On **Windows**, check
+> *Settings → Privacy & security → Camera* and ensure "Let desktop apps access
+> your camera" is on (and that your terminal/Python is allowed). On macOS you'll
+> get a camera-permission prompt the first time. If the camera can't be opened,
+> Jarvis says so out loud instead of crashing.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -421,6 +461,21 @@ A study-mode session looks like:
 🔊 Speaking...
 ```
 
+A vision turn looks like:
+
+```
+🗣️  Heard: jarvis what does this say
+🧭 Routing intent...
+👁️  vision_request {'request': 'what does this say'}
+🔊 Speaking...   # "Okay, hold it steady."
+📸 Opening webcam...
+📸 Captured frame (48213 bytes).
+👁️  Analyzing image...
+🧹 Deleted temp capture.
+💬 Jarvis: It's a page about binary search trees — the heading says "BST insertion".
+🔊 Speaking...
+```
+
 A memory-recall turn looks like:
 
 ```
@@ -474,9 +529,11 @@ skills/
   web_skill.py          # live web search via Claude web_search + web_lookup tool schema
   code_skill.py         # code generation -> file -> editor + code_generation tool schema
   study_skill.py        # Socratic tutor prompt + study_mode toggle + session topics
+  vision_skill.py       # OpenCV webcam capture + Claude vision + vision_request tool schema
 system_config.json      # editable app nickname -> path + folder shortcuts
 jarvis_generated_code/  # (auto-created) generated code files land here
 jarvis_memory.db        # (auto-created) local SQLite conversation memory
+jarvis_temp/            # (auto-created) temporary webcam captures (deleted by default)
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
 tts.py                  # pyttsx3 / ElevenLabs speech output
 main.py                 # the loop that ties it all together (incl. confirmation step)
@@ -492,6 +549,13 @@ dispatch to `SpotifySkill`, `SystemSkill`, `WebSkill`, or `CodeSkill`) or
 function calling for intent classification *and* parameter extraction — no
 manual keyword parsing. Short conversation history is retained so follow-ups
 ("play it again", "now what's playing?") keep context.
+
+**Vision:** the `vision_request` tool dispatches to `VisionSkill`, which speaks
+a "hold it steady" heads-up (via a `notify` callback into TTS), captures one
+webcam frame with OpenCV, base64-encodes it, and sends it to Claude's vision
+model with the spoken request as context. In study mode it uses the tutoring
+prompt so homework images stay Socratic. The temp capture is deleted unless
+`KEEP_CAPTURES=true`. Camera errors become spoken messages, never crashes.
 
 **Memory:** `memory.py` logs every exchange to SQLite and periodically asks
 Claude (a separate summarization prompt) to compress recent exchanges into a

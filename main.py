@@ -13,6 +13,7 @@ from skills.code_skill import CodeSkill
 from skills.spotify_skill import SpotifySkill
 from skills.study_skill import StudySkill
 from skills.system_skill import SystemSkill
+from skills.vision_skill import VisionSkill
 from skills.web_skill import WebSkill
 from stt import Transcriber
 from tts import create_tts
@@ -24,7 +25,7 @@ log = logging.getLogger("jarvis")
 def main():
     config.setup_logging()
     log.info("=" * 50)
-    log.info(" JARVIS voice assistant — Phase 7 (+ persistent memory)")
+    log.info(" JARVIS voice assistant — Phase 8 (+ vision)")
     log.info("=" * 50)
 
     # Initialize components (loads models, validates API key).
@@ -65,6 +66,13 @@ def main():
         # Study mode (no external deps; pure prompt/session state).
         study = StudySkill()
 
+        # Vision (needs OpenCV + a webcam + API key). notify speaks the heads-up.
+        try:
+            vision = VisionSkill(notify=tts.speak)
+        except Exception as e:
+            log.warning("Vision disabled: %s", e)
+            vision = None
+
         # Persistent memory (local SQLite). Never block startup on it.
         try:
             memory = Memory()
@@ -74,7 +82,8 @@ def main():
 
         router = IntentRouter(
             spotify_skill=spotify, system_skill=system, web_skill=web,
-            code_skill=code, study_skill=study, memory=memory,
+            code_skill=code, study_skill=study, vision_skill=vision,
+            memory=memory,
         )
     except Exception as e:
         log.error("Startup failed: %s", e)

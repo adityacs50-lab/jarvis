@@ -24,7 +24,8 @@ Tips:
 - **Layer 5:** skills are stubbed so you see the *route*, not side effects.
   A "FAIL" may just be a reasonable alternative read — eyeball the misses.
 - **Layer 6:** test skills individually — Spotify → system → web → code →
-  study → memory — before assuming combinations work.
+  study → memory → vision — before assuming combinations work. Vision needs a
+  webcam and OS camera permission for the terminal/Python process.
 
 ## Offline tests (no mic / audio / API key — CI-friendly)
 
@@ -33,6 +34,7 @@ These run anywhere and validate the logic *around* the audio/LLM:
 ```bash
 python tests/test_router_wiring.py   # dispatch for every intent, with a faked Claude
 python tests/test_memory.py          # SQLite logging / recall / clear
+python tests/test_vision_logic.py    # file load, study-mode prompt, temp cleanup
 ```
 
 `test_router_wiring.py` fakes the Anthropic client so it can assert that each

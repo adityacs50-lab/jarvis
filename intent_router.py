@@ -34,6 +34,7 @@ from skills.code_skill import CODE_GENERATION_TOOL
 from skills.spotify_skill import MUSIC_CONTROL_TOOL
 from skills.study_skill import STUDY_MODE_TOOL
 from skills.system_skill import SYSTEM_CONTROL_TOOL
+from skills.vision_skill import VISION_REQUEST_TOOL
 from skills.web_skill import WEB_LOOKUP_TOOL
 
 # In study mode, answer coursework yourself as the tutor; only reach for a tool
@@ -56,7 +57,8 @@ _AFFIRMATIVE = {
 
 class IntentRouter:
     def __init__(self, spotify_skill=None, system_skill=None, web_skill=None,
-                 code_skill=None, study_skill=None, memory=None):
+                 code_skill=None, study_skill=None, vision_skill=None,
+                 memory=None):
         from anthropic import Anthropic
 
         if not config.ANTHROPIC_API_KEY:
@@ -69,6 +71,7 @@ class IntentRouter:
         self.web = web_skill
         self.code = code_skill
         self.study = study_skill
+        self.vision = vision_skill
         self.memory = memory
         self.history = []
         self._pending = None  # callable awaiting spoken confirmation
@@ -92,6 +95,8 @@ class IntentRouter:
             tools.append(WEB_LOOKUP_TOOL)
         if self.study:
             tools.append(STUDY_MODE_TOOL)
+        if self.vision:
+            tools.append(VISION_REQUEST_TOOL)
         if self.memory:
             tools.append(MEMORY_RECALL_TOOL)
             tools.append(MEMORY_CLEAR_TOOL)
@@ -178,6 +183,16 @@ class IntentRouter:
             return self._dispatch("⌨️  code_generation", message, tool_use,
                                    self.code.handle(tool_use.input),
                                    intent="code_generation")
+
+        if tool_use and tool_use.name == "vision_request" and self.vision:
+            # Pass study context so homework images stay Socratic in study mode.
+            tutor_prompt = self.study.tutor_system_prompt if self.study else None
+            vision_result = self.vision.handle(
+                tool_use.input, study_mode=self.study_mode,
+                tutor_system_prompt=tutor_prompt,
+            )
+            return self._dispatch("👁️  vision_request", message, tool_use,
+                                   vision_result, intent="vision_request")
 
         # No tool: a plain text reply (general chat, or tutoring in study mode).
         reply = "".join(

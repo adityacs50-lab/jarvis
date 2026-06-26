@@ -30,6 +30,7 @@ PHRASES = [
     ("what's 2 plus 2",                       "general_chat"),
     ("tell me a joke",                        "general_chat"),
     ("enter study mode",                      "study_mode"),
+    ("look at this and tell me what it says", "vision_request"),
     ("what did we talk about yesterday",      "memory_recall"),
     ("forget everything",                     "memory_clear"),
 ]
@@ -81,7 +82,8 @@ def main():
         system_skill=StubSkill("system_control"),
         web_skill=StubSkill("web_lookup"),
         code_skill=StubSkill("code_generation"),
-        study_skill=StubStudy(),
+        study_skill=StudyStub(),
+        vision_skill=StubSkill("vision_request"),
         memory=StubMemory(),
     )
 
