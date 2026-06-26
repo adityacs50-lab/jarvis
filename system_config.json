@@ -1,0 +1,25 @@
+{
+  "_comment": "Map spoken app nicknames to an executable path or command. Keys are matched case-insensitively and loosely (e.g. 'vs code' matches 'open VS Code'). Values can be a bare command on PATH (e.g. 'notepad') or a full path. These defaults assume Windows; edit them to match your machine.",
+  "apps": {
+    "notepad": "notepad",
+    "calculator": "calc",
+    "calc": "calc",
+    "paint": "mspaint",
+    "command prompt": "cmd",
+    "terminal": "wt",
+    "explorer": "explorer",
+    "file explorer": "explorer",
+    "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "edge": "msedge",
+    "firefox": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+    "vs code": "C:\\Users\\YOUR_USERNAME\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "vscode": "C:\\Users\\YOUR_USERNAME\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+    "spotify": "C:\\Users\\YOUR_USERNAME\\AppData\\Roaming\\Spotify\\Spotify.exe"
+  },
+  "_folders_comment": "Optional shortcuts for file operations. Nicknames map to a base directory so you can say 'list files in downloads'.",
+  "folders": {
+    "downloads": "C:\\Users\\YOUR_USERNAME\\Downloads",
+    "documents": "C:\\Users\\YOUR_USERNAME\\Documents",
+    "desktop": "C:\\Users\\YOUR_USERNAME\\Desktop"
+  }
+}

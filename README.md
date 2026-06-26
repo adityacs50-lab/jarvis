@@ -1,22 +1,27 @@
-# Jarvis — Voice Assistant (Phase 2)
+# Jarvis — Voice Assistant (Phase 3)
 
 A JARVIS-style, always-listening voice assistant that runs as a background
 script. Say the wake word, ask a question, and Jarvis answers out loud with a
 witty, concise personality powered by Claude.
 
-**Phase 2** adds a **Spotify control skill**: an intent-routing step decides
-whether each request is *music control* or *general chat*. Music requests are
-parsed into structured actions via Claude's tool use and executed through the
-Spotify Web API.
+An intent-routing step classifies every request into one of three categories
+and dispatches it to the right skill:
+
+- **`music_control`** → Spotify (Phase 2)
+- **`system_control`** → open apps, open websites/search, basic file ops (Phase 3)
+- **`general_chat`** → a normal spoken Claude reply
+
+Intent classification and parameter extraction both happen in a single Claude
+call using native tool use — no keyword matching.
 
 ```
 wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
         ↑                                                          ↓
         |                                              intent router (Claude)
-        |                                            ┌──────────┴──────────┐
-        |                                       music_control        general_chat
-        |                                            ↓                     ↓
-      speak  ←  text-to-speech  ←──────────  Spotify skill    /    Claude reply
+        |                            ┌──────────────────────┼──────────────────────┐
+        |                      music_control          system_control          general_chat
+        |                            ↓                      ↓                       ↓
+      speak  ←  text-to-speech  ←  Spotify skill   /   System skill    /     Claude reply
 ```
 
 ## How it works
@@ -28,6 +33,7 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 | Speech-to-text   | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`base`, int8, CPU) |
 | Intent + reasoning | Anthropic Claude (`claude-sonnet-4-6`) with **tool use** |
 | Music control    | [Spotipy](https://spotipy.readthedocs.io/) (Spotify Web API) |
+| System control   | Python stdlib (`os`, `subprocess`, `webbrowser`) |
 | Text-to-speech   | [pyttsx3](https://github.com/nateshmbhat/pyttsx3) (offline, default) or [ElevenLabs](https://elevenlabs.io/) (optional) |
 
 ### Music commands (natural language — no exact phrasing required)
@@ -38,7 +44,19 @@ wake word ("jarvis")  →  record (until you stop talking)  →  transcribe
 - **Volume** — "set volume to 40", "turn it up", "make it quieter"
 - **Now playing** — "what's playing?", "what song is this?"
 
-Anything that isn't music control is answered conversationally as before.
+### System commands (Phase 3)
+
+- **Open an app** — "open Chrome", "open VS Code", "launch Notepad"
+  (resolved via your `system_config.json` app map)
+- **Open a website** — "open youtube.com", "go to github.com"
+- **Web search** — "search Google for lasagna recipes"
+- **List a folder** — "list files in Downloads", "what's in my Documents folder"
+- **Create a folder** — "make a folder called notes on my desktop"
+- **Open a file** — "open report.txt"
+- **Delete a file/folder** — "delete old.txt" → **requires spoken confirmation**
+  (Jarvis asks "Are you sure…? Say yes to confirm" and does nothing unless you say yes)
+
+Anything that isn't music or system control is answered conversationally.
 
 `faster-whisper` is used instead of vanilla `openai-whisper` because it is
 several times faster on a normal laptop CPU, which matters for a real-time
@@ -130,6 +148,46 @@ Spotify's API does not allow playback control on free accounts.
 If you skip Spotify setup, Jarvis still runs — it just falls back to chat-only
 mode and tells you music control is unavailable.
 
+### 5. System control setup (Phase 3 — app & folder mapping)
+
+App launching is OS-specific, so the nickname → executable mapping lives in a
+plain JSON file, **`system_config.json`**, that you edit by hand. No code
+changes needed. The defaults assume **Windows**.
+
+```jsonc
+{
+  "apps": {
+    "notepad": "notepad",                       // bare command on PATH
+    "chrome":  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "vs code": "C:\\Users\\YOUR_USERNAME\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+  },
+  "folders": {
+    "downloads": "C:\\Users\\YOUR_USERNAME\\Downloads",
+    "desktop":   "C:\\Users\\YOUR_USERNAME\\Desktop"
+  }
+}
+```
+
+- **`apps`** — keys are spoken nicknames (matched case-insensitively and
+  loosely, so `"vs code"` matches "open VS Code"). Values are either a bare
+  command found on `PATH` (e.g. `notepad`, `calc`, `msedge`) or a full path to
+  an `.exe`. **Replace `YOUR_USERNAME`** and fix any install paths for your
+  machine. If a spoken app isn't in the map, Jarvis tries it as a bare command
+  and, failing that, tells you to add it to `system_config.json`.
+- **`folders`** — optional shortcuts so you can say "list files in Downloads"
+  instead of a full path. File commands also accept literal paths and expand
+  `~` / environment variables.
+
+> **Cross-platform note:** the launcher in `skills/system_skill.py` already
+> branches on OS (`os.startfile` on Windows, `open` on macOS, direct exec on
+> Linux). To target Mac/Linux, just put the right commands/paths in
+> `system_config.json` — e.g. `"chrome": "google-chrome"` on Linux.
+
+> **Safety:** deleting a file or folder always triggers a spoken confirmation
+> ("Are you sure you want to delete X? Say yes to confirm"). Jarvis listens for
+> your yes/no answer immediately (no wake word needed) and does **nothing**
+> unless you clearly confirm. Anything else cancels.
+
 ## Run
 
 ```bash
@@ -148,6 +206,20 @@ You'll see state logging in the console:
 🎵 [music_control] {'action': 'play', 'query': 'Arctic Monkeys'}
 💬 [music] Jarvis: Playing Do I Wanna Know? by Arctic Monkeys.
 🔊 Speaking...
+```
+
+A system-control turn with a destructive action looks like:
+
+```
+🗣️  Heard: delete the folder old reports
+🧭 Routing intent...
+🖥️  system_control {'action': 'delete_path', 'path': 'old reports'}
+⚠️  Awaiting confirmation: Are you sure you want to delete the folder old reports? Say yes to confirm.
+🔊 Speaking...
+🔴 Recording... (speak now)
+🗣️  Heard: yes
+✅ Confirmation received — executing.
+🔊 Speaking...   # "Deleted the folder old reports."
 ```
 
 A general-chat turn looks like:
@@ -175,31 +247,42 @@ in `.env`. Useful ones:
 | `SILENCE_TIMEOUT_MS` | `800`              | How long of a pause ends your recording |
 | `CLAUDE_MODEL`       | `claude-sonnet-4-6`| LLM model                               |
 | `TTS_ENGINE`         | auto               | `pyttsx3` or `elevenlabs`               |
+| `SYSTEM_CONFIG_PATH` | `system_config.json` | App/folder mapping for system control |
 
 ## Project structure
 
 ```
-config.py               # settings + logging
+config.py               # settings + logging + system_config.json loader
 wake_word.py            # openWakeWord detection
 recorder.py             # VAD-based recording until silence
 stt.py                  # faster-whisper transcription
-intent_router.py        # Claude tool-use: music_control vs. general_chat
+intent_router.py        # Claude tool-use: music_control / system_control / general_chat
 skills/
+  base.py               # SkillResult (incl. pending/confirmation contract)
   spotify_skill.py      # Spotipy playback control + music_control tool schema
+  system_skill.py       # apps / websites / file ops + system_control tool schema
+system_config.json      # editable app nickname -> path + folder shortcuts
 llm.py                  # standalone Claude chat helper (Phase 1; superseded by the router)
 tts.py                  # pyttsx3 / ElevenLabs speech output
-main.py                 # the loop that ties it all together
+main.py                 # the loop that ties it all together (incl. confirmation step)
 ```
 
 ### Intent routing
 
 `intent_router.py` makes a single Claude call per utterance, passing the
-`music_control` tool definition. Claude decides whether to **call the tool**
-(returning a structured `{action, query, volume_level, ...}` payload that we
-dispatch to `SpotifySkill`) or to **reply in plain text** (general chat). This
-uses Claude's native tool use / function calling for intent classification and
-parameter extraction — no manual keyword parsing. Short conversation history is
-retained so follow-ups ("play it again", "now what's playing?") keep context.
+`music_control` and `system_control` tool definitions. Claude either **calls a
+tool** (returning a structured payload we dispatch to `SpotifySkill` or
+`SystemSkill`) or **replies in plain text** (general chat). This uses Claude's
+native tool use / function calling for intent classification *and* parameter
+extraction — no manual keyword parsing. Short conversation history is retained
+so follow-ups ("play it again", "now what's playing?") keep context.
+
+**Confirmation contract:** skills return a `SkillResult`. For destructive
+operations the result carries a `pending` callable instead of executing
+immediately; the router speaks the confirmation prompt, enters an
+"awaiting confirmation" state, and only runs `pending()` if your next spoken
+answer is affirmative. This keeps the dangerous-action gate in one place and
+makes it reusable by future skills.
 
 ## Troubleshooting
 
@@ -216,9 +299,15 @@ retained so follow-ups ("play it again", "now what's playing?") keep context.
 - **Spotify re-auth loop / wrong redirect:** make sure the Redirect URI in the
   Spotify dashboard exactly matches `SPOTIPY_REDIRECT_URI`. Delete the
   `.spotify_cache` file to force re-authorization.
+- **"I don't have <app> configured":** add the app (nickname → path) to
+  `system_config.json`. Remember to replace `YOUR_USERNAME` in the defaults.
+- **App opens the wrong thing / not found:** the value must be a real command on
+  `PATH` or a valid full path. Test it in a terminal first (e.g. `where chrome`).
+- **File command can't find a folder:** use a `folders` shortcut, a full path,
+  or `~`/env vars — relative names only work if they're configured.
 
 ## Roadmap (next phases)
 
-- More skills (timers, reminders, web search, smart home)
+- More skills (timers, reminders, smart home)
 - GUI / system tray app
 - Interruptible / streaming responses

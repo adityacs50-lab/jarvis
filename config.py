@@ -1,4 +1,5 @@
 """Central configuration and logging setup for Jarvis."""
+import json
 import logging
 import os
 
@@ -45,6 +46,29 @@ SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID", "")
 SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET", "")
 SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
 SPOTIPY_CACHE_PATH = os.getenv("SPOTIPY_CACHE_PATH", ".spotify_cache")
+
+# --- System control (Phase 3) ---------------------------------------------
+# App nickname -> executable mapping and folder shortcuts live in a JSON file
+# so they can be edited without touching code (it's OS-specific).
+SYSTEM_CONFIG_PATH = os.getenv("SYSTEM_CONFIG_PATH", "system_config.json")
+
+
+def load_system_config():
+    """Load the app/folder mapping JSON. Returns {} if the file is missing."""
+    try:
+        with open(SYSTEM_CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        logging.getLogger("jarvis").warning(
+            "System config '%s' not found; app shortcuts unavailable.",
+            SYSTEM_CONFIG_PATH,
+        )
+        return {"apps": {}, "folders": {}}
+    return {
+        "apps": data.get("apps", {}),
+        "folders": data.get("folders", {}),
+    }
+
 
 # --- TTS ------------------------------------------------------------------
 # "pyttsx3" (offline, default) or "elevenlabs" (requires ELEVENLABS_API_KEY)
